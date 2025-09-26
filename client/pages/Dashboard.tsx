@@ -11,10 +11,15 @@ export default function Dashboard() {
     (async () => {
       try {
         const res = await fetch("/api/chat/config");
+        if (!res.ok) throw new Error("no server config");
         const data = (await res.json()) as { webhookUrl: string | null };
         setWebhookUrl(data.webhookUrl ?? "");
       } catch (e) {
-        setWebhookUrl("");
+        const fallback =
+          (globalThis as any).__N8N_WEBHOOK__ ||
+          (import.meta as any).env?.VITE_N8N_CHAT_WEBHOOK_URL ||
+          "https://yossefflix2.app.n8n.cloud/webhook/ab05a77b-9a6e-4292-b9ea-e90e0c7d31ab";
+        setWebhookUrl(fallback);
       }
     })();
   }, []);
@@ -23,11 +28,13 @@ export default function Dashboard() {
     setLoading(true);
     setReply("");
     try {
-      const res = await fetch("/api/chat", {
+      // Try server first
+      let res = await fetch("/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ message: "Hello from Dashboard", history: [] }),
       });
+      if (!res.ok) throw new Error("api/chat unavailable");
       const ct = res.headers.get("content-type") || "";
       if (ct.includes("application/json")) {
         const data = await res.json();
@@ -37,8 +44,32 @@ export default function Dashboard() {
       } else {
         setReply(await res.text());
       }
-    } catch (e) {
-      setReply("Request failed. Check the webhook URL and network.");
+    } catch {
+      // Direct webhook fallback
+      try {
+        const res2 = await fetch(webhookUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            message: "Hello from Dashboard",
+            history: [],
+          }),
+          mode: "cors",
+        });
+        const ct2 = res2.headers.get("content-type") || "";
+        if (ct2.includes("application/json")) {
+          const data2 = await res2.json();
+          setReply(
+            typeof (data2 as any).reply === "string"
+              ? (data2 as any).reply
+              : JSON.stringify(data2),
+          );
+        } else {
+          setReply(await res2.text());
+        }
+      } catch {
+        setReply("Request failed. Check the webhook URL and network.");
+      }
     } finally {
       setLoading(false);
     }
